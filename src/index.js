@@ -48,7 +48,7 @@ function psi_to_binary_string(psi) {
 
     if (psi.length == 38 && psi.slice(0,3) == "[<:" && psi.slice(35,38) == ":>]") {
         let hex = psi.slice(3,35);
-        console.log(`After stripping: ${hex}`)
+
         let binary = hexToBinary(hex);
         if (binary.valid) {
           return { valid: true, result: binary.result}
@@ -201,6 +201,7 @@ function binary_to_hex(s) {
         // convert from front
         for (k = 0; k <= i; k += 1) {
             if (s[k] !== '0' && s[k] !== '1') {
+                console.log(`Expecting 0 or 1 at position ${k}`)
                 return { valid: false };
             }
             accum = accum * 2 + parseInt(s[k], 10);
