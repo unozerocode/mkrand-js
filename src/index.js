@@ -1,10 +1,11 @@
 exports.rand = rand; 
+exports.seedUnit = seedUnit;
 exports.psi_to_binary = psi_to_binary_string;
 
 let cyclic = 0;
 
 function seedUnit() {
-    row = Array(128).fill(0, 0, 128);
+    let row = Array(128).fill(0, 0, 128);
     row[(128/2)-1] = 1;
     return row;
 }
@@ -14,7 +15,6 @@ function time_seed_b2() {
     let d = new Date();
     let n = d.getTime(); 
     let base2 = (n).toString(2);
-    let cyclic = 0;
 
     let start_index = ~~(128 / 2) - ~~(base2.length / 2);
     
@@ -131,14 +131,6 @@ function cxor ( left,  right)
    }
 }
 
-function row_xor(a, b) {
-    ret = Array();
-    for (i=0; i<=127; i++){
-        ret[i] = cxor(a[i], b[i]);
-    }
-    return ret;
-}
-
 
 /* Rule 30 : x(n+1,i) = x(n,i-1) xor [x(n,i) or x(n,i+1)] */
 function rule_30( left,  middle,  right){
@@ -173,12 +165,12 @@ function sha30 (seed) {
 
 function binary_to_hex(s) {
 
-    var i, k, part, accum, ret = '';
+    let i, part, accum, ret = '';
     for (i = s.length-1; i >= 3; i -= 4) {
         // extract out in substrings of 4 and convert to hex
         part = s.substr(i+1-4, 4);
         accum = 0;
-        for (k = 0; k < 4; k += 1) {
+        for (let k = 0; k < 4; k += 1) {
             if (part[k] !== '0' && part[k] !== '1') {
                 // invalid character
                 console.log(`Found invalid character ${part[k]} at index ${k}` )
@@ -199,7 +191,7 @@ function binary_to_hex(s) {
     if (i >= 0) {
         accum = 0;
         // convert from front
-        for (k = 0; k <= i; k += 1) {
+        for (let k = 0; k <= i; k += 1) {
             if (s[k] !== '0' && s[k] !== '1') {
                 console.log(`Expecting 0 or 1 at position ${k}`)
                 return { valid: false };
@@ -213,9 +205,9 @@ function binary_to_hex(s) {
 }
 
 function hexToBinary(s) {
-    var i, k, part, ret = '';
+    let   ret = '';
     // lookup table for easier conversion. '0' characters are padded for '1' to '7'
-    var lookupTable = {
+    let lookupTable = {
         '0': '0000', '1': '0001', '2': '0010', '3': '0011', '4': '0100',
         '5': '0101', '6': '0110', '7': '0111', '8': '1000', '9': '1001',
         'a': '1010', 'b': '1011', 'c': '1100', 'd': '1101',
@@ -223,8 +215,8 @@ function hexToBinary(s) {
         'A': '1010', 'B': '1011', 'C': '1100', 'D': '1101',
         'E': '1110', 'F': '1111'
     };
-    for (i = 0; i < s.length; i += 1) {
-        if (lookupTable.hasOwnProperty(s[i])) {
+    for (let i = 0; i < s.length; i += 1) {
+        if (Object.prototype.hasOwnProperty.call(lookupTable, s[i])) {
             ret += lookupTable[s[i]];
         } else {
             return { valid: false };
