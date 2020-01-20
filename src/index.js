@@ -1,31 +1,80 @@
 exports.rand = rand; 
-exports.seedUnit = seedUnit;
 exports.psi_to_binary = psi_to_binary_string;
+exports.createBinaryReadStream = createBinaryReadStream;
+exports.eval_block = eval_block; // For testing
+exports.bit_pack = bit_pack; // For testing
+exports.seedUnit_psi = seedUnit_psi; // For testing
+exports.seedUnit_binary_unpacked = seedUnit_binary_unpacked;
 
+const { Readable } = require('stream');
+
+const BAD_PSI_FORMAT = "PSI Format is [<:32 hex digits:>]";
+const BLOCK_SIZE = 128;
 let cyclic = 0;
 
-function seedUnit() {
-    let row = Array(128).fill(0, 0, 128);
-    row[(128/2)-1] = 1;
+
+/**
+ *  Implements a Readable stream based on a given seed
+ *  or generates a time seed when not given one
+ *  @param {string} seed 
+ *  @returns Stream of bit-packed Buffer
+ */
+function createBinaryReadStream(seed) {
+    const read_stream = new Readable({
+        read(size) {
+            let num_blocks = Math.ceil(size / 16);
+            for (let i=0; i< num_blocks; i++){
+              this.push(bit_pack(rand(seed)));
+            }
+        }
+    })
+   return read_stream;
+}
+
+
+
+
+/**
+ *  Creates an unpacked binary Buffer with a 1 at the center and 0 every other cell
+ *  Used for testing or when generating the canonical sequence
+ *  @returns Buffer
+ */
+function seedUnit_binary_unpacked() {
+    let row = Buffer.alloc(BLOCK_SIZE, 0);
+    row[(BLOCK_SIZE/2)-1] = 1;
     return row;
 }
 
-function time_seed_b2() {
-    let row = Array(128).fill(0, 0, 128);  
+/**
+ *  Creates Unit seed in PSI format
+ *  1 at the center and 0 every other cell
+ *  Used for testing or when generating the canonical sequence
+ */
+function seedUnit_psi() {
+    return binary_unpacked_to_psi(seedUnit_binary_unpacked());
+}
+
+
+/**
+ *  Generates a binary Buffer initialized with the current time
+ *  plus an incrementing cyclic number
+ *  @returns Buffer
+ */
+function time_seed_binary_unpacked() {
+    let row = Buffer.alloc(BLOCK_SIZE,0);
     let d = new Date();
     let n = d.getTime(); 
     let base2 = (n).toString(2);
 
-    let start_index = ~~(128 / 2) - ~~(base2.length / 2);
+    let start_index = ~~(BLOCK_SIZE / 2) - ~~(base2.length / 2);
     
     for (let i=0; i<base2.length; i++){
       row[start_index + i] = parseInt(base2[i]);
     }
-
     
     cyclic = cyclic + 1;
     let cyclic_base2 = (cyclic).toString(2);
-    let cyclic_start_index = 128 - cyclic_base2.length;
+    let cyclic_start_index = BLOCK_SIZE - cyclic_base2.length;
     
     for(let i= 0; i < cyclic_base2.length; i++){
         row[cyclic_start_index + i] = parseInt(cyclic_base2[i]);
@@ -34,69 +83,83 @@ function time_seed_b2() {
     return row;
 }
 
-function time_seed_psi() {
-   let hex = binary_to_hex(time_seed_b2().join(""));
-   if (!hex.valid) {
-       console.log("Error converting time_seed_b2 to hex");
-       return "[<::>]";
-   } else {
-     return "[<:" + hex.result + ":>]";
-   }
+/**
+ * Packs bits from 1 bit per byte unpacked to 1 bit per bit
+ * @param {Buffer} buf 
+ * @returns Buffer
+ */
+function bit_pack(buf) {
+  let rb = Buffer.alloc(buf.length/8);
+
+  for (let cur_byte = 0; cur_byte <= buf.length; cur_byte++){
+    for (let bit = 0; bit <= 7; bit++){
+      rb[cur_byte] = rb[cur_byte] | (buf[cur_byte] << bit)
+    }
+  }
+  return rb;
 }
 
+/**
+ *  Convert unpacked binary buffer to PSI Format 
+ *  @param {Buffer} buf
+ *  @returns string in PSI format
+ */
+function binary_unpacked_to_psi(buf) {
+   let hex = binary_string_to_hex(buf.join(""));
+    return "[<:" + hex + ":>]";
+}
+
+
+/**
+ * Converts a PSI formattted string to a binary string
+ * @param {string} psi 
+ * @throws Error on bad PSI format
+ */
 function psi_to_binary_string(psi) {
 
-    if (psi.length == 38 && psi.slice(0,3) == "[<:" && psi.slice(35,38) == ":>]") {
+    if (psi.length == 38 && (psi.slice(0,3) == "[<:") && (psi.slice(35,38) == ":>]")) {
         let hex = psi.slice(3,35);
 
-        let binary = hexToBinary(hex);
-        if (binary.valid) {
-          return { valid: true, result: binary.result}
-        } else {
-          return { valid: false, error: "Error converting "}
-        }
+        return hexToBinaryString(hex);
+        
     } else {
-        console.log("psi_to_binary_string invalid format");
-        return { valid: false, error: `Invalid format, psi.length: ${psi.length}`}
+        throw Error(BAD_PSI_FORMAT);
     }
 }
 
-function psi_to_binary_array(psi) {
+/**
+ * Converts PSI formatted string to an unpack binary Buffer
+ * @param {String} psi 
+ * @returns 128-byte Buffer of 0 and 1
+ */
+function psi_to_binary_buffer(psi) {
     let binary_string = psi_to_binary_string(psi);
-    if (binary_string.valid) {
-      let res_array = Array();
-      for (let i=0; i < binary_string.result.length; i++) {
-          res_array.push(parseInt(binary_string.result.slice(i,i+1)))
+    let res_buf = Buffer.alloc(BLOCK_SIZE,0);
+      for (let i=0; i < binary_string.length; i++) {
+          res_buf[i] = parseInt(binary_string.slice(i,i+1));
       }
-      return {valid: true, result: res_array}
-    } else {
-      return { valud: false}
-    }
+     return res_buf;
 }
 
-function rand(seed = time_seed_psi()) {
-    let seed_binary_array = psi_to_binary_array(seed);
-    let result;
-    if (seed_binary_array.valid) {
-        result = binary_to_hex(sha30(seed_binary_array.result).join(""));
-        if (!result.valid) {
-            console.log("Error converting to hex");
-            return {valid: false}
-        } else {
-            return {valid: true, data: result.result};
-        }
-    } else {
-        console.log(`Error parsing seed ${seed}`);
-        return {valid: false}
-    }
+/** Generates a random 128-bit block
+ * @param {String} seed in PSI format, otherwises creates a time seed
+ * @returns String
+ */
+function rand(seed = binary_unpacked_to_psi(time_seed_binary_unpacked())) {
+    return binary_string_to_hex(sha30(psi_to_binary_buffer(seed)).join(""));
 }
-// Returns {row: last evaluated row, center: center column}
+
+/**
+ * Evaluates a block based on the given seed
+ * @param {String} seed 
+ * @returns JSON object .row: Buffer of last evaluated row , .center: Buffer of center column unpacked
+ */
 function eval_block(seed) {
     let ret = seed;
-    let center = Array();
-    for(let i = 0; i <= 127; i++) {
+    let center = Buffer.alloc(BLOCK_SIZE,0);
+    for(let i = 0; i <= BLOCK_SIZE-1; i++) {
         ret = eval_rule(ret);
-        center.push(ret[(128/2)-1]);
+        center[i] = (ret[BLOCK_SIZE/2-1]);
     }
     return {row: ret, center: center};
 }
@@ -116,7 +179,9 @@ function cor ( left,  right)
 }
 
 
-/* XOR */
+/**
+   Performs XOR operation 
+**/
 function cxor ( left,  right)
 {
    if ((left == null) || (right == null)) {
@@ -132,39 +197,50 @@ function cxor ( left,  right)
 }
 
 
-/* Rule 30 : x(n+1,i) = x(n,i-1) xor [x(n,i) or x(n,i+1)] */
+/** 
+ *  Rule 30 : A XOR (B OR C)
+ * 
+ *  x(n+1,i) = x(n,i-1) xor [x(n,i) or x(n,i+1)] 
+ */
 function rule_30( left,  middle,  right){
     return (cxor (left, cor (middle, right)));
   }
   
 
-/* Evaluate source vector with elemental rule, placing result in dest  */
+/** Evaluate source vector with elemental rule
+ *  @param {Buffer source} unpacked binary Buffer of length 128
+ */
 function eval_rule(source){
-    let dest = Array(128).fill(0);
-    for (let col = 0; col <= 127; col++){
+    let dest = Buffer.alloc(BLOCK_SIZE,0);
+
+    for (let col = 0; col <= BLOCK_SIZE-1; col++){
     
-       let left_cell   = (col == 0) ? source[127]   : source[col-1];
-       let right_cell  = (col == 127) ? source[0]   : source[col+1]; 
+       let left_cell   = (col == 0) ? source[BLOCK_SIZE-1]   : source[col-1];
+       let right_cell  = (col == BLOCK_SIZE-1) ? source[0]   : source[col+1]; 
        let middle_cell = source[col];
-     //  console.log(`Left ${left_cell} Middle ${middle_cell} Right ${right_cell}`) ; 
+   
        dest[col] = rule_30(left_cell, middle_cell, right_cell);  
-    //   console.log(`Evaluated ${col} to ${dest[col]}`); 
+
     }  
     return dest;
  }
 
- /* SHA30 - Use the input segment as the seed, generate two square fields,
- * keep the center column of the second.
+ /**  Use the input segment as the seed, generate two square fields,
+ *    keep the center column of the second.
+ *    @param {string} seed in PSI Format
  */
-
 function sha30 (seed) {
     let block = eval_block(seed)
     block = eval_block(block.row)
     return block.center;
 }
 
-function binary_to_hex(s) {
-
+/**
+ * Convert Binary string to hexadecimal
+ * @param {string} s String of 0 and 1
+ * @throws Error on bad format
+ */
+function binary_string_to_hex(s) {
     let i, part, accum, ret = '';
     for (i = s.length-1; i >= 3; i -= 4) {
         // extract out in substrings of 4 and convert to hex
@@ -173,8 +249,7 @@ function binary_to_hex(s) {
         for (let k = 0; k < 4; k += 1) {
             if (part[k] !== '0' && part[k] !== '1') {
                 // invalid character
-                console.log(`Found invalid character ${part[k]} at index ${k}` )
-                return { valid: false };
+                throw new Error(`Found invalid character ${part[k]} at index ${k}`)
             }
             // compute the length 4 substring
             accum = accum * 2 + parseInt(part[k], 10);
@@ -193,18 +268,22 @@ function binary_to_hex(s) {
         // convert from front
         for (let k = 0; k <= i; k += 1) {
             if (s[k] !== '0' && s[k] !== '1') {
-                console.log(`Expecting 0 or 1 at position ${k}`)
-                return { valid: false };
+                throw new Error(`Expecting 0 or 1 at position ${k}`)
             }
             accum = accum * 2 + parseInt(s[k], 10);
         }
         // 3 bits, value cannot exceed 2^3 - 1 = 7, just convert
         ret = String(accum) + ret;
     }
-    return { valid: true, result: ret };
+    return ret;
 }
 
-function hexToBinary(s) {
+/**
+ * Converts hexadecimal to binary string
+ * @param {string} s hexadecimal formatted string
+ * @returns {string}
+ */
+function hexToBinaryString(s) {
     let   ret = '';
     // lookup table for easier conversion. '0' characters are padded for '1' to '7'
     let lookupTable = {
@@ -219,9 +298,9 @@ function hexToBinary(s) {
         if (Object.prototype.hasOwnProperty.call(lookupTable, s[i])) {
             ret += lookupTable[s[i]];
         } else {
-            return { valid: false };
+            throw new Error(`Error parsing s[i] at index ${i}`);
         }
     }
-    return { valid: true, result: ret };
+    return ret;
 }
 
