@@ -1,40 +1,78 @@
 const assert = require("assert");
-const  {rand, createBinaryReadStream, eval_block, seedUnit_psi, seedUnit_binary_unpacked, bit_pack} = require("../src/index");
+const  {rand: rand, createBinaryReadStream, eval_block, seedUnit, seedUnit_psi, 
+   buf_to_psi, psi_to_buf, getBit: getBit, setBit, entropy, time_seed} = require("../src/index");
 
 describe('MKRand', () => {
   describe('rand', () => {
-    it('should return 32 hex digits', () => {
+    it("Rand_packed should return a 16 byte buffer", () => {
       let r = rand();
-      assert.equal(r.length, 32);
-      let regexp = /^[0-9a-fA-F]+$/;
-      assert.equal(regexp.test(r), true);
-      
+      assert.equal(r.length, 16);
+      console.log("Rand generated " + r.toString("hex"));
+      console.log(`Entropy of r: ${entropy(r)}`);
     }),
 
-    it("should thoww exception on bad PSI format", () => {
-      try {
-        r = rand("deadbeef");
-      } catch (e) {
-        assert.equal(e.message, "PSI Format is [<:32 hex digits:>]")
+    it("getBit", () => {
+      let test_buf = Buffer.alloc(16,0xFF);
+      for (let bit_num = 0; bit_num <= 127; bit_num++){
+        assert.equal(getBit(test_buf, bit_num), true);
+      }
+      let test_buf2 = Buffer.alloc(1,0);
+      for (let bit_num = 0; bit_num <= 7; bit_num++) {
+        assert.equal(getBit(test_buf2, bit_num), false);
+      }
+      test_buf2[0] = 0x80;
+      assert.equal(getBit(test_buf2, 7), true);
+      assert.equal(getBit(test_buf2, 6), false);
+      assert.equal(getBit(test_buf2, 5), false);
+      assert.equal(getBit(test_buf2, 4), false);
+      assert.equal(getBit(test_buf2, 3), false);
+      assert.equal(getBit(test_buf2, 2), false);
+      assert.equal(getBit(test_buf2, 1), false);
+      assert.equal(getBit(test_buf2, 0), false);
+    }),
+
+    it("buf_to_psi", () => {
+      let test_buf = Buffer.alloc(16,0x00);
+      assert.equal(buf_to_psi(test_buf), "[<:00000000000000000000000000000000:>]");
+      test_buf = Buffer.alloc(16,0xFF);
+      assert.equal(buf_to_psi(test_buf), "[<:FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF:>]");
+    }),
+
+    it("psi to buffer", () => {
+      let buf_a = psi_to_buf("[<:FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF:>]");
+      let buf_b = Buffer.alloc(16,0xFF);
+      assert.equal(buf_a.compare(buf_b),0);
+      console.log(`Entropy ${entropy(buf_a)}`);
+    }),
+
+    it("setBit", () => {
+      let test_buf = Buffer.alloc(16, 0x00);
+      for (let i=0; i <= 127; i++) {
+        setBit(test_buf, i, true);
+        assert.equal(getBit(test_buf,i),true);
+        setBit(test_buf, i, false);
+        assert.equal(getBit(test_buf, i), false);
       }
     }),
 
-    it("bitpack", () => {
-      let test_buf = Buffer.alloc(128,1);  // Unpacked 128 byte buffer
-      let packed_buf = bit_pack(test_buf);
-      assert.equal(packed_buf.length, 16);
-      assert.equal(packed_buf[0], 0xFF);
-      assert.equal(packed_buf[1], 0xFF);
-      assert.equal(packed_buf[2], 0xFF);
-      assert.equal(packed_buf[3], 0xFF);
-      assert.equal(packed_buf[4], 0xFF);
-      assert.equal(packed_buf[5], 0xFF);
-      assert.equal(packed_buf[6], 0xFF);
-      assert.equal(packed_buf[7], 0xFF);
+    it("time seed", () => {
+      let ts1 = time_seed();
+      let ts2 = time_seed();
+      assert.equal(ts1.compare(ts2) == 0, false);
+      assert.equal(ts1.length, 16);
+      assert.equal(ts2.length, 16);
+      console.log(`Entropy of time seed ${entropy(ts1)}`);
     }),
 
+    it("Entropy calculation", () => {
+      let bufA = Buffer.alloc(16, 0);
+      assert.equal(entropy(bufA), 0);
+      let r = rand();
+      assert.equal(entropy(r) >= 0.99, true);
+    }),
+/*
     it("should produce a stream", () => {
-      let rs = createBinaryReadStream(seedUnit_psi());
+      let rs = createBinaryReadStream(seedUnit());
       let rchunk = rs.read(16);
       let chunk_hex = "";
       for (const value of rchunk.values()) {
@@ -42,26 +80,26 @@ describe('MKRand', () => {
       }
       assert.equal(chunk_hex,"0f8ff00f8ff00f8ff00f8ff0");  // check with cryptol
     }),
-
+*/
     it("evalblock(seedUnit) should return 101110011000101100100..", () => {
-      let eb = eval_block(seedUnit_binary_unpacked());
+      let eb = eval_block(seedUnit());
 
-      assert.equal(eb.center[0], 1);
-      assert.equal(eb.center[1], 0);
+      assert.equal(getBit(eb.center,0), true);
+      assert.equal(getBit(eb.center,1), false);
 
-      assert.equal(eb.center[2], 1);
-      assert.equal(eb.center[3], 1);
-      assert.equal(eb.center[4], 1);
+      assert.equal(getBit(eb.center,2), true);
+      assert.equal(getBit(eb.center,3), true);
+      assert.equal(getBit(eb.center,4), true);
       
-      assert.equal(eb.center[5], 0);
-      assert.equal(eb.center[6], 0);
+      assert.equal(getBit(eb.center,5), false);
+      assert.equal(getBit(eb.center,6), false);
 
-      assert.equal(eb.center[7], 1);
-      assert.equal(eb.center[8], 1);
+      assert.equal(getBit(eb.center,7), true);
+      assert.equal(getBit(eb.center,8), true);
 
-      assert.equal(eb.center[9], 0);
-      assert.equal(eb.center[10], 0);
-      assert.equal(eb.center[11], 0);
+      assert.equal(getBit(eb.center,9), false);
+      assert.equal(getBit(eb.center,10), false);
+      assert.equal(getBit(eb.center,11), false);
     })
   });
     

@@ -14,5 +14,9 @@ module.exports = {
         "sourceType": "module"
     },
     "rules": {
-    }
+    },
+    "overrides": [
+        {
+          "files": ["src/*.js", "__tests__/*.js"]
+        }]
 };
