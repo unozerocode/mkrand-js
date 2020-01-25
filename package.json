@@ -5,7 +5,7 @@
   "main": "index.js",
   "scripts": {
     "build": "npm run lint && babel ./src -d ./lib",
-    "lint": "eslint ./src",
+    "lint": "eslint ./src && eslint ./__tests__",
     "test": "jest"
   },
   "repository": {
@@ -30,6 +30,8 @@
     "nyc": "^15.0.0"
   },
   "dependencies": {
-    "babel-jest": "^24.9.0"
+    "babel-jest": "^24.9.0",
+    "eslint-plugin-jest": "^23.6.0",
+    "readable-stream": "^3.5.0"
   }
 }

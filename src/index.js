@@ -1,8 +1,9 @@
 
 exports.rand = rand;
-exports.createBinaryReadStream = createBinaryReadStream;
+exports.createNonDeterministicStream = createNonDeterministicStream;
+exports.createDeterministicStream = createDeterministicStream;
 exports.eval_block = eval_block; // For testing
-exports.getBit = getBit; // For testing
+
 exports.buf_to_psi = buf_to_psi;
 exports.psi_to_buf = psi_to_buf;
 exports.getBit = getBit;
@@ -12,13 +13,12 @@ exports.seedUnit = seedUnit;
 
 exports.entropy = entropy;
 
-const { Readable } = require('stream');
+const { Readable } = require('readable-stream');
 
 const BAD_PSI_FORMAT = "PSI Format is [<:32 hex digits:>]";
 const BLOCK_SIZE = 128;  // In bits
 let cyclic = 0;
 
-// TODO use packed buffer throughout, and use Buffer.from(s,"hex") to convert from string
 
 /**
  *  Implements a Readable stream based on a given seed
@@ -26,19 +26,112 @@ let cyclic = 0;
  *  @param {Buffer} seed 
  *  @returns Stream of bit-packed Buffer
  */
-function createBinaryReadStream(seed) {
-    const read_stream = new Readable({
-        read(size) {
-            let num_blocks = Math.ceil(size / 16);
-            
-            for (let i=0; i< num_blocks; i++){
-              this.push(rand(seed));
-            }
-        }
-    })
-   return read_stream;
+class NonDeterministicStream extends Readable {
+    constructor(opt) {
+      super(opt);
+    }
+  
+    _read() {
+        this.push(rand(time_seed()));
+      }
 }
 
+function createNonDeterministicStream() {
+    return new NonDeterministicStream({});
+}
+
+/**
+ * Creates a deterministic stream based on the given seed
+ * Will run in counter mode from the starting seed
+ */
+class DeterministicStream extends Readable {
+    /**
+     * 
+     * @param {Object} opt Options for Readable
+     * @param {String} seed Starting seed
+     * @param {number} size of stream in bytes
+     * @returns Readable
+     */
+    constructor(opt, seed, size) {
+      super(opt);
+      this.seed = seed;
+      this.size = size;
+      this.remaining_bytes = size;
+      console.log(`Constructed stream with size ${size} and remaining bytes ${this.remaining_bytes}`);
+    }
+
+    // Produce an exact number of bytes, used for the fractional part of the request,
+    // should never be more than 16
+    writeBytes(bytes) {
+      let ret = Buffer.alloc(bytes, 0);
+      let r = rand(this.seed);
+      this.seed = r;
+      for (let i = 0; i < bytes; i++){
+        ret[i] = r[i];
+      }
+      this.remaining_bytes -= bytes;
+      if (! this.push(ret)) { return} 
+      if (this.remaining_bytes == 0) {
+        this.push(null);
+      }
+    }
+
+    writeBlocks(blocks) {
+      for (let i = 0; i < blocks; i++) {
+        this.seed = rand(this.seed);
+        if (! this.push(this.seed)) { return }
+        this.remaining_bytes -= (16);
+      }
+      
+      if (this.remaining_bytes == 0) {
+        this.push(null);
+      }
+    }
+
+    /**Calculates how many blocks and remaining byes are needed
+     * to fill a request of the given number of bytes
+     * Return object with blocks and bytes fields
+     * @param {number} bytes 
+     * @return {Object} 
+     */
+    getBlocks_and_bytes(bytes) {
+      if (bytes <= 16) {
+        return {"blocks": 0, "bytes": bytes}
+      } else {
+        let num_blocks = Math.floor(bytes / 16);
+        let num_bytes = bytes - (num_blocks * 16)
+        return {"blocks": num_blocks, "bytes": num_bytes}
+      }
+    }
+  
+    _read(requested_bytes) {
+       
+       // The requested bytes are set by the Node streaming mechanism 
+       // Whereas size is set by the client
+       // If requested_bytes > size, emit size bytes and then end the stream by writing null
+       if (requested_bytes > this.size) {
+        let bb = this.getBlocks_and_bytes(this.size == 0 ? requested_bytes : this.size);
+        this.writeBlocks(bb.blocks);
+        this.writeBytes(bb.bytes);
+
+       } else {  // Requested bytes <= this.size
+        
+        let bb = this.getBlocks_and_bytes(requested_bytes);
+
+        this.writeBlocks(bb.blocks);
+        this.writeBytes(bb.bytes);
+       }
+       // The other conditions are
+       //   if requeted_bytes < size, emit requeseted bytes
+       //   if size == 0 always fulfill requested_bytes
+       //   if size > 0 then decrement size with every emission
+      }
+}
+
+
+function createDeterministicStream( seed, size = 0) {
+    return new DeterministicStream({}, seed, size);
+}
 
 /**
  * Create a packed buffer with center bit true
@@ -61,9 +154,9 @@ function seedUnit() {
 function setBit(buffer, bit_num, value){
     let byte_num = (buffer.length - Math.floor(bit_num / 8))-1;
     bit_num = bit_num % 8;
-    if(value == false){
+    if (value == false){
       buffer[byte_num] &= ~(1 << bit_num);
-    }else{
+    } else {
       buffer[byte_num] |= (1 << bit_num);
     }
     return buffer;
@@ -85,7 +178,7 @@ function getBit(buffer, bit_num){
 
 
 /**
- *  Generate a buffer initialized with current time
+ *  Generate a buffer initialized with current time and cyclic variable
  */
 function time_seed() {
   let buf = Buffer.alloc(BLOCK_SIZE / 8,0);
@@ -139,8 +232,13 @@ function entropy(buf) {
 /**
  * Convert buffer to PSI Format
  * @param {Buffer} buf 
+ * @returns String
+ * @throws Error if buffer is not BLOCK_SIZE
  */
 function buf_to_psi(buf){
+    if (buf.length != BLOCK_SIZE / 8) {
+        throw Error(`Block must be of size ${BLOCK_SIZE/8}`);
+    }
     let hex = buf.toString("hex").toUpperCase();
     return "[<:" + hex.toUpperCase() + ":>]";
 }
@@ -164,17 +262,17 @@ function psi_to_buf(psi){
 
 /** Generates a random 128-bit block
  * @param {Buffer} seed otherwises creates a time seed
- * @returns String
+ * @returns Buffer
  */
 function rand(seed = time_seed()) {
-    console.log("Starting rand_packed with seed " + seed.toString("hex"));
+    //console.log("Starting rand with seed " + buf_to_psi(seed));
     return sha30(seed);
 }
 
 /**
  * Evaluates a block based on the given seed
- * @param {String} seed 
- * @returns JSON object .row: Buffer of last evaluated row , .center: Buffer of center column unpacked
+ * @param {Buffer} seed 
+ * @returns JSON object with Buffer of last evaluated row, and Buffer of center column 
  */
 function eval_block(seed) {
     let center = Buffer.alloc(BLOCK_SIZE / 8, 0);
@@ -187,46 +285,21 @@ function eval_block(seed) {
 }
 
 
-/**
- * Boolean XOR
- * @param {Boolean} left 
- * @param {Boolean} right
- * @returns Boolean 
- */
-function bxor(left, right) {
-    if (((left == true) && (right == false)) ||
-       ((left == false) && (right == true))) {
-           return (true);
-       } else {
-           return (false);
-       }
-}
-
-/**
- * Boolean or
- * @param {*} left 
- * @param {*} right 
- * @returns Boolean
- */
-function bor(left, right) {
-    if ((left == true) || (right == true)) {
-        return (true)
-    } else {
-        return (false)
-    }
-}
-
 
 /** 
  *  Rule 30 : A XOR (B OR C)
  * 
  *  x(n+1,i) = x(n,i-1) xor [x(n,i) or x(n,i+1)] 
  */
-function rule_30_boolean(left, middle, right) {
-    return (bxor (left, bor( middle, right)));
+function rule_30(left, middle, right) {
+    return ((left ^ ( middle | right)));
 }
   
- 
+ /**
+  * Evaluate a buffer with elemental rule
+  * @param {Buffer} source 
+  * @returns Buffer
+  */
  function eval_rule(source) {
      let dest = Buffer.alloc(BLOCK_SIZE / 8, 0);
     // let row_log = "";
@@ -236,14 +309,18 @@ function rule_30_boolean(left, middle, right) {
          let right_cell = (col == 0) ? getBit(source, BLOCK_SIZE-1) : getBit(source, col-1);
          let middle_cell = getBit(source, col);
       //   row_log = row_log.concat(rule_30_boolean(left_cell, middle_cell, right_cell) ? "1" : "0");
-         setBit(dest, col, rule_30_boolean(left_cell, middle_cell, right_cell));
+         setBit(dest, col, rule_30(left_cell, middle_cell, right_cell));
      }
    //  console.log("Eval rule: " + row_log);
    //  console.log("Eval rule_packed after " + dest.toString("hex"));
      return dest;
  }
 
-
+/**
+ * Evaluates two blocks of given buffer, returns center column of second block
+ * @param {Buffer} seed 
+ * @returns {Buffer}
+ */
 function sha30(seed) {
     let block = eval_block(seed);
     block = eval_block(block.row);

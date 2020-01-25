@@ -1,14 +1,41 @@
 const assert = require("assert");
-const  {rand: rand, createBinaryReadStream, eval_block, seedUnit, seedUnit_psi, 
+const  {rand: rand, createDeterministicStream, eval_block, seedUnit, 
    buf_to_psi, psi_to_buf, getBit: getBit, setBit, entropy, time_seed} = require("../src/index");
+
+   var fs = require("fs");
+
+function wait_for_stream_end_promise(stream, num_bytes) {
+  let remaining_bytes = num_bytes;
+  return new Promise ((resolve, reject) => {
+    stream.on("data", () => {
+      remaining_bytes--;
+      if (remaining_bytes == 0) { 
+        resolve() }
+      if (remaining_bytes < 0) { reject(`remaining bytes went negative: ${remaining_bytes}`)}
+    })
+    stream.on("end", () => {
+      resolve();
+    });
+    stream.on("error", error => reject(error));
+  });
+}
+
+function wait_for_file_end_promise(stream) {
+  return new Promise((resolve, reject) => {
+    stream.on("finish", () => {
+      resolve();
+    });
+    stream.on("error", (e) => {
+      reject(e);
+    })
+  })
+}
 
 describe('MKRand', () => {
   describe('rand', () => {
-    it("Rand_packed should return a 16 byte buffer", () => {
+    it("Rand should return a 16 byte buffer", () => {
       let r = rand();
       assert.equal(r.length, 16);
-      console.log("Rand generated " + r.toString("hex"));
-      console.log(`Entropy of r: ${entropy(r)}`);
     }),
 
     it("getBit", () => {
@@ -65,22 +92,46 @@ describe('MKRand', () => {
     }),
 
     it("Entropy calculation", () => {
-      let bufA = Buffer.alloc(16, 0);
+      // Create a buffer of 100 blocks and check its entropy
+      let bufA = Buffer.alloc(1600, 0);
       assert.equal(entropy(bufA), 0);
-      let r = rand();
-      assert.equal(entropy(r) >= 0.99, true);
-    }),
-/*
-    it("should produce a stream", () => {
-      let rs = createBinaryReadStream(seedUnit());
-      let rchunk = rs.read(16);
-      let chunk_hex = "";
-      for (const value of rchunk.values()) {
-        chunk_hex += (value.toString(16));
+      let blocks = [];
+      for (let i = 0; i<100; i++) {
+        blocks[i] = rand();
       }
-      assert.equal(chunk_hex,"0f8ff00f8ff00f8ff00f8ff0");  // check with cryptol
+      
+      let bufConcat = Buffer.concat(blocks);
+      let h = entropy(bufConcat);
+      console.log(`Entropy of blocks: ${h}`);
+      assert.equal(h >= 0.99, true);
     }),
-*/
+
+    it("should produce a stream", () => {
+      let ds = createDeterministicStream(seedUnit(),16);
+      let rchunk = ds.read(16);
+      let chunk_hex = rchunk.toString("hex");
+      assert.equal(chunk_hex,"3644030f6742c602abe9f8a6c8cd391b");  // check with cryptol
+    }),
+
+    it("should produce a 1KB file", async () => {
+      const TEST_FILE = "./test.bin"
+      let num_bytes = 1000;
+      let ds = createDeterministicStream(seedUnit(),num_bytes);
+      let ws = fs.createWriteStream(TEST_FILE);
+      ds.pipe(ws);
+
+      await wait_for_stream_end_promise(ds, num_bytes);
+      await wait_for_file_end_promise(ws);
+      var stats = fs.statSync(TEST_FILE);
+      var fileSizeInBytes = stats.size;
+      assert.equal(fileSizeInBytes, num_bytes);
+      // check its entropy
+      fs.readFile(TEST_FILE, function (err, data) {
+        assert(entropy(data) > 0.99);
+      });
+     
+    }),
+
     it("evalblock(seedUnit) should return 101110011000101100100..", () => {
       let eb = eval_block(seedUnit());
 
