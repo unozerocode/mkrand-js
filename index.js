@@ -1,4 +1,4 @@
-
+//@ts-check
 exports.rand = rand;
 exports.createNonDeterministicStream = createNonDeterministicStream;
 exports.createDeterministicStream = createDeterministicStream;
@@ -120,6 +120,7 @@ class DeterministicStream extends Readable {
 
         this.writeBlocks(bb.blocks);
         this.writeBytes(bb.bytes);
+        
        }
        // The other conditions are
        //   if requeted_bytes < size, emit requeseted bytes
@@ -167,7 +168,7 @@ function setBit(buffer, bit_num, value){
  * Big-endian ordering
  * BLOCK_SIZE..0
  * @param {Buffer} buffer 
- * @param {int} bit_num
+ * @param {number} bit_num
  * @returns {boolean} bit
  */
 function getBit(buffer, bit_num){
