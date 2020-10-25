@@ -107,4 +107,5 @@ dist
 .vscode/
 lib/
 
+.gcloud/
 test.bin
