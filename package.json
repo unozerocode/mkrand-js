@@ -6,7 +6,9 @@
   "scripts": {
     "build": "npm run lint && babel ./src -d ./lib",
     "lint": "eslint ./src && eslint ./__tests__",
-    "test": "jest"
+    "test": "jest",
+    "prepare": "npm run snyk-protect",
+    "snyk-protect": "snyk-protect"
   },
   "repository": {
     "type": "git",
@@ -32,6 +34,8 @@
   "dependencies": {
     "babel-jest": "^24.9.0",
     "eslint-plugin-jest": "^23.6.0",
-    "readable-stream": "^3.5.0"
-  }
+    "readable-stream": "^3.5.0",
+    "@snyk/protect": "latest"
+  },
+  "snyk": true
 }
