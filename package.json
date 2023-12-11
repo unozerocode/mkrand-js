@@ -30,7 +30,7 @@
     "nyc": "^15.0.0"
   },
   "dependencies": {
-    "babel-jest": "^24.9.0",
+    "babel-jest": "^25.1.0",
     "eslint-plugin-jest": "^23.6.0",
     "readable-stream": "^3.5.0"
   }
